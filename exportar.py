@@ -18,7 +18,7 @@ import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
-from motor import TURNOS, NOMBRES_DIA, MINIMO
+from motor import TURNOS, NOMBRES_DIA, MESES_ABREV, MINIMO
 
 # Colores reutilizables
 AMARILLO = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
@@ -122,22 +122,23 @@ def exportar_excel(programacion, anio, mes):
         celda.fill = GRIS
         celda.alignment = Alignment(horizontal="center")
 
-    # matriz de semanas del mes (lunes como primer dia)
-    semanas = calendar.Calendar(firstweekday=0).monthdayscalendar(anio, mes)
+    # matriz de semanas del periodo (fechas reales, ya vienen completas lun-dom)
+    fechas = sorted(programacion)
+    semanas = [fechas[i:i + 7] for i in range(0, len(fechas), 7)]
 
     fila_actual = 3
     for semana in semanas:
         # Cada dia ocupa una celda con: numero + los 3 turnos y su gente.
         contenidos = []
         estilos = []  # (tiene_rojo, tiene_amarillo)
-        for numero_dia in semana:
-            if numero_dia == 0:
-                contenidos.append("")
-                estilos.append((False, False))
-                continue
-            fecha = date(anio, mes, numero_dia)
+        for fecha in semana:
             dia = programacion[fecha]
-            lineas = [str(numero_dia)]
+            # Etiqueta del dia; si es de un mes vecino se marca con el mes.
+            if fecha.month != mes:
+                etiqueta = f"{fecha.day} {MESES_ABREV[fecha.month - 1]}"
+            else:
+                etiqueta = str(fecha.day)
+            lineas = [etiqueta]
             tiene_rojo = tiene_amarillo = False
             for turno in TURNOS:
                 datos = dia[turno]

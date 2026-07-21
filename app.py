@@ -20,7 +20,8 @@ from streamlit_sortables import sort_items
 
 from motor import (
     construir_operadores, construir_programacion, resumen_programacion,
-    TURNOS, LIBRANZAS, NOMBRES_DIA, MINIMO,
+    fechas_del_periodo, etiqueta_fecha,
+    TURNOS, LIBRANZAS, NOMBRES_DIA, MESES_ABREV, MINIMO,
 )
 from exportar import exportar_excel, exportar_csv
 
@@ -130,7 +131,10 @@ def vista_paso_2():
     operadores = st.session_state.operadores
     nombres = list(operadores.keys())
     anio, mes = st.session_state.anio, st.session_state.mes
-    _, ultimo_dia = calendar.monthrange(anio, mes)
+
+    # Fechas reales del periodo (semanas completas lun-dom; incluye dias de los
+    # meses vecinos en los bordes).
+    fechas_periodo = fechas_del_periodo(anio, mes)
 
     # "Firma" que cambia si cambia el conjunto de nombres. Se usa en las claves
     # de los widgets para que, si el coordinador cambia los operadores, los
@@ -138,7 +142,11 @@ def vista_paso_2():
     firma = str(abs(hash(tuple(sorted(nombres)))))
 
     st.header("Paso 2. Vacaciones y flexibilidad")
-    st.caption(f"{len(nombres)} operadores | {mes_nombre} {anio}")
+    st.caption(
+        f"{len(nombres)} operadores | {mes_nombre} {anio} | "
+        f"periodo del {etiqueta_fecha(fechas_periodo[0])} "
+        f"al {etiqueta_fecha(fechas_periodo[-1])}"
+    )
 
     # --------------------------- Vacaciones ---------------------------- #
     st.subheader("Vacaciones")
@@ -147,7 +155,6 @@ def vista_paso_2():
         "Puede dejar vacio a quien no tenga vacaciones."
     )
 
-    dias_opciones = list(range(1, ultimo_dia + 1))
     vacaciones_sel = {}
     # Se muestran en dos columnas para que ocupen menos espacio vertical.
     columnas = st.columns(2)
@@ -155,8 +162,9 @@ def vista_paso_2():
         col = columnas[i % 2]
         seleccion = col.multiselect(
             op,
-            options=dias_opciones,
-            key=f"vac_{firma}_{op}",   # la clave incluye el nombre: no se pisa
+            options=fechas_periodo,          # opciones = fechas del periodo
+            format_func=etiqueta_fecha,      # se muestran como 'Lun 31 ago'
+            key=f"vac_{firma}_{op}",         # la clave incluye el nombre: no se pisa
             placeholder="Sin vacaciones",
         )
         vacaciones_sel[op] = set(seleccion)
@@ -240,9 +248,15 @@ def _celda_turno_html(turno, datos):
     )
 
 
-def _calendario_html(programacion, anio, mes):
-    """Construye el calendario completo del mes como una tabla HTML."""
-    semanas = calendar.Calendar(firstweekday=0).monthdatescalendar(anio, mes)
+def _calendario_html(programacion, mes):
+    """
+    Construye el calendario del periodo como tabla HTML. Cada fila es una semana
+    completa (lunes a domingo). Los dias de meses vecinos se muestran atenuados
+    y con la abreviatura del mes.
+    """
+    fechas = sorted(programacion)
+    # El periodo ya son semanas completas y ordenadas: se parte de 7 en 7.
+    semanas = [fechas[i:i + 7] for i in range(0, len(fechas), 7)]
 
     html = ["<table style='width:100%;border-collapse:collapse;table-layout:fixed;'>"]
     # Encabezado de dias de la semana
@@ -257,20 +271,26 @@ def _calendario_html(programacion, anio, mes):
     for semana in semanas:
         html.append("<tr>")
         for fecha in semana:
-            # Dias que no pertenecen al mes se muestran en gris y vacios.
+            # Numero de dia. Si es de un mes vecino, se atenua y se marca el mes.
             if fecha.month != mes:
-                html.append(
-                    "<td style='border:1px solid #eee;background:#fafafa;"
-                    "vertical-align:top;height:120px;'></td>"
+                encabezado = (
+                    f"<div style='font-size:12px;margin-bottom:3px;color:#999;'>"
+                    f"{fecha.day} {MESES_ABREV[fecha.month - 1]}</div>"
                 )
-                continue
-            celda = [f"<div style='font-weight:bold;font-size:12px;"
-                     f"margin-bottom:3px;'>{fecha.day}</div>"]
+                fondo_celda = "#fbfbfb"
+            else:
+                encabezado = (
+                    f"<div style='font-weight:bold;font-size:12px;"
+                    f"margin-bottom:3px;'>{fecha.day}</div>"
+                )
+                fondo_celda = "#ffffff"
+
+            celda = [encabezado]
             for turno in TURNOS:
                 celda.append(_celda_turno_html(turno, programacion[fecha][turno]))
             html.append(
-                "<td style='border:1px solid #ccc;padding:4px;vertical-align:top;"
-                "height:120px;'>" + "".join(celda) + "</td>"
+                f"<td style='border:1px solid #ccc;padding:4px;vertical-align:top;"
+                f"height:120px;background:{fondo_celda};'>" + "".join(celda) + "</td>"
             )
         html.append("</tr>")
     html.append("</table>")
@@ -304,7 +324,7 @@ def vista_paso_3():
     st.write("")
 
     # Calendario
-    st.markdown(_calendario_html(programacion, anio, mes), unsafe_allow_html=True)
+    st.markdown(_calendario_html(programacion, mes), unsafe_allow_html=True)
 
     st.divider()
 

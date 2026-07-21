@@ -50,11 +50,19 @@ Streamlit por otra cosa, `motor.py` se reutiliza tal cual.
 - **Turno en amarillo:** ese turno tiene al menos una negociacion.
 - **Turno en rojo:** no se alcanzo el minimo de 3 operadores. Regla incumplida.
 
+## El mes va por semanas completas, no del 1 al 31
+
+El periodo a programar se compone de semanas completas de lunes a domingo.
+Una semana de borde pertenece al mes que contiene su jueves: si de lunes a
+jueves la semana cae en el mes anterior, esa semana es del mes anterior. Por eso
+el calendario empieza siempre un lunes y termina un domingo, e incluye unos pocos
+dias de los meses vecinos en los extremos (se muestran atenuados y con la
+abreviatura del mes).
+
 ## Como decide el sistema (resumen)
 
 Todos trabajan su turno fijo todos los dias, salvo su libranza o sus vacaciones.
-El calculo se hace semana a semana. Cuando un turno de un dia queda por debajo de 3,
-el sistema lo cubre asi, en orden:
+Cuando un turno de un dia queda por debajo de 3, el sistema lo cubre asi, en orden:
 
 1. **Cambio de turno (un dia).** Mueve gente de un turno con excedente a ese turno,
    solo por ese dia. No le cuesta descanso a nadie.
@@ -67,6 +75,12 @@ el sistema lo cubre asi, en orden:
 
 En cada paso empieza por el mas flexible segun el ranking correspondiente. Si aun
 asi un turno no llega a 3, lo marca en rojo.
+
+## Regla de descanso entre noche y dia
+
+Nadie puede trabajar el turno de Noche un dia y ademas Mañana o Tarde al dia
+siguiente. El sistema respeta esto en todas las negociaciones de turno, incluso
+cuando el cruce cae entre dos semanas (noche del domingo con la mañana del lunes).
 
 Nota: una misma negociacion de libranza aparece marcada en los dos dias que la
 persona pasa a trabajar esa semana, a proposito, para que el coordinador vea el
