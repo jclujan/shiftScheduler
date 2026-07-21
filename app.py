@@ -24,6 +24,7 @@ from motor import (
     TURNOS, LIBRANZAS, NOMBRES_DIA, MESES_ABREV, MINIMO,
 )
 from exportar import exportar_excel, exportar_csv
+from configuracion import exportar_config_csv, importar_config_csv
 
 
 # --------------------------------------------------------------------------- #
@@ -75,8 +76,89 @@ if st.sidebar.button("Volver a empezar"):
 # =========================================================================== #
 # PASO 1: matriz de preferencia
 # =========================================================================== #
+def _matriz_preferencia_html(operadores):
+    """
+    Devuelve una tabla HTML 3x3 (filas = libranzas, columnas = turnos) con los
+    nombres de cada celda. Sirve de recordatorio de lo que se esta considerando.
+    """
+    grid = {(lib, tur): [] for lib in LIBRANZAS for tur in TURNOS}
+    for op, info in operadores.items():
+        grid[(info["libranza"], info["turno"])].append(op)
+
+    html = ["<table style='width:100%;border-collapse:collapse;table-layout:fixed;"
+            "font-size:12px;'>"]
+    # Encabezado de turnos
+    html.append("<tr><th style='border:1px solid #ccc;padding:6px;background:#404040;"
+                "color:#fff;'>Libra \\ Turno</th>")
+    for turno in TURNOS:
+        html.append(f"<th style='border:1px solid #ccc;padding:6px;background:#404040;"
+                    f"color:#fff;'>{turno}</th>")
+    html.append("</tr>")
+    # Filas por libranza
+    for lib in LIBRANZAS:
+        html.append(f"<tr><td style='border:1px solid #ccc;padding:6px;background:#eef;"
+                    f"font-weight:bold;'>{lib}</td>")
+        for turno in TURNOS:
+            nombres = ", ".join(sorted(grid[(lib, turno)])) or "&mdash;"
+            html.append(f"<td style='border:1px solid #ccc;padding:6px;"
+                        f"vertical-align:top;'>{nombres}</td>")
+        html.append("</tr>")
+    html.append("</table>")
+    return "".join(html)
+
+
+def _cargar_config(resultado):
+    """
+    Toma el resultado de importar_config_csv y deja el estado listo para editar.
+    Limpia los estados de los widgets que podrian chocar con los datos nuevos.
+    """
+    # Borrar estados de widgets previos (matriz, vacaciones, rankings).
+    for clave in list(st.session_state.keys()):
+        if clave.startswith(("pref_", "vac_", "sort_turno_", "sort_libranza_")):
+            del st.session_state[clave]
+
+    st.session_state.matriz_pref = resultado["matriz_preferencia"]
+    st.session_state.operadores = construir_operadores(
+        resultado["matriz_preferencia"])[0]
+    if resultado.get("anio"):
+        st.session_state.anio = resultado["anio"]
+    if resultado.get("mes"):
+        st.session_state.mes = resultado["mes"]
+    # Valores para prellenar el paso 2.
+    st.session_state.vacaciones_pre = {
+        op: sorted(dias) for op, dias in resultado["vacaciones"].items()
+    }
+    st.session_state.rank_turno_pre = resultado["rank_turno"]
+    st.session_state.rank_libranza_pre = resultado["rank_libranza"]
+    st.session_state.paso = 2
+
+
 def vista_paso_1():
     st.header("Paso 1. Matriz de preferencia")
+
+    # ------------------ Cargar una configuracion guardada ------------------ #
+    with st.expander("Cargar una configuracion guardada (CSV)"):
+        st.write(
+            "Si ya tiene un CSV de configuracion de un mes anterior, subalo aqui "
+            "para recuperar todo (matriz, vacaciones y rankings) y solo ajustar "
+            "lo que cambio. Tambien puede editarlo antes en Excel."
+        )
+        archivo = st.file_uploader("Archivo de configuracion", type=["csv"],
+                                   key="cfg_uploader")
+        if archivo is not None:
+            firma_archivo = f"{archivo.name}-{archivo.size}"
+            if st.session_state.get("_ultimo_config") != firma_archivo:
+                texto = archivo.getvalue().decode("utf-8-sig")
+                resultado = importar_config_csv(texto)
+                if resultado["errores"]:
+                    for e in resultado["errores"]:
+                        st.error(e)
+                else:
+                    st.session_state["_ultimo_config"] = firma_archivo
+                    _cargar_config(resultado)
+                    st.success("Configuracion cargada. Revise y continue al paso 2.")
+                    st.rerun()
+
     st.write(
         "Escriba los nombres de los operadores en la celda que corresponde a su "
         "**turno** (columna) y su **par de dias de libranza** (fila). "
@@ -148,6 +230,17 @@ def vista_paso_2():
         f"al {etiqueta_fecha(fechas_periodo[-1])}"
     )
 
+    # Recordatorio de la matriz de preferencia (que estamos considerando).
+    with st.expander("Recordatorio: matriz de preferencia (turno y libranza)", expanded=True):
+        st.markdown(_matriz_preferencia_html(operadores), unsafe_allow_html=True)
+
+    st.divider()
+
+    # Valores para prellenar si se cargo una configuracion. Se filtran las fechas
+    # de vacaciones al periodo actual para evitar opciones invalidas.
+    vac_pre = st.session_state.get("vacaciones_pre", {})
+    conjunto_periodo = set(fechas_periodo)
+
     # --------------------------- Vacaciones ---------------------------- #
     st.subheader("Vacaciones")
     st.write(
@@ -160,9 +253,12 @@ def vista_paso_2():
     columnas = st.columns(2)
     for i, op in enumerate(nombres):
         col = columnas[i % 2]
+        # Prellenado desde config (solo fechas que caen en el periodo actual).
+        pre = [d for d in vac_pre.get(op, []) if d in conjunto_periodo]
         seleccion = col.multiselect(
             op,
             options=fechas_periodo,          # opciones = fechas del periodo
+            default=pre,                     # prellenado si venia de un CSV
             format_func=etiqueta_fecha,      # se muestran como 'Lun 31 ago'
             key=f"vac_{firma}_{op}",         # la clave incluye el nombre: no se pisa
             placeholder="Sin vacaciones",
@@ -177,18 +273,29 @@ def vista_paso_2():
         "Arrastre los nombres para ordenarlos. **Arriba = mas flexible** "
         "(a esa persona se le pedira primero el cambio)."
     )
+
+    # Orden inicial: el de la config cargada si existe; si no, el orden de entrada.
+    # Se filtra a los nombres actuales por si se editaron en el paso 1.
+    def _orden_inicial(clave_pre):
+        previo = st.session_state.get(clave_pre)
+        if not previo:
+            return nombres
+        filtrado = [op for op in previo if op in nombres]
+        filtrado += [op for op in nombres if op not in filtrado]
+        return filtrado
+
     col_a, col_b = st.columns(2)
     with col_a:
         st.markdown("**Flexibilidad para cambios de TURNO**")
         rank_turno = sort_items(
-            nombres,
+            _orden_inicial("rank_turno_pre"),
             direction="vertical",
             key=f"sort_turno_{firma}",   # clave ligada a los nombres actuales
         )
     with col_b:
         st.markdown("**Flexibilidad para cambios de DIAS DE LIBRANZA**")
         rank_libranza = sort_items(
-            nombres,
+            _orden_inicial("rank_libranza_pre"),
             direction="vertical",
             key=f"sort_libranza_{firma}",
         )
@@ -206,6 +313,10 @@ def vista_paso_2():
             anio, mes, operadores, vacaciones,
             rank_turno, rank_libranza,
         )
+        # Se guardan los inputs finales para poder exportarlos como configuracion.
+        st.session_state.vacaciones_final = vacaciones
+        st.session_state.rank_turno_final = rank_turno
+        st.session_state.rank_libranza_final = rank_libranza
         st.session_state.paso = 3
         st.rerun()
 
@@ -326,25 +437,52 @@ def vista_paso_3():
     # Calendario
     st.markdown(_calendario_html(programacion, mes), unsafe_allow_html=True)
 
+    # Recordatorio de la matriz de preferencia.
+    with st.expander("Recordatorio: matriz de preferencia (turno y libranza)"):
+        st.markdown(_matriz_preferencia_html(st.session_state.operadores),
+                    unsafe_allow_html=True)
+
     st.divider()
 
-    # Descargas
+    # Datos de entrada finales (para las exportaciones de configuracion).
+    operadores = st.session_state.operadores
+    vacaciones = st.session_state.get("vacaciones_final", {})
+    rank_turno = st.session_state.get("rank_turno_final", list(operadores.keys()))
+    rank_libranza = st.session_state.get("rank_libranza_final", list(operadores.keys()))
+
+    # Descargas del calendario
     nombre_base = f"turnos_{anio}_{mes:02d}"
     col1, col2, col3 = st.columns(3)
     col1.download_button(
-        "Descargar Excel (con colores)",
-        data=exportar_excel(programacion, anio, mes),
+        "Calendario en Excel (con colores)",
+        data=exportar_excel(programacion, anio, mes, operadores,
+                            vacaciones, rank_turno, rank_libranza),
         file_name=f"{nombre_base}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         type="primary",
     )
     col2.download_button(
-        "Descargar CSV",
+        "Calendario en CSV",
         data=exportar_csv(programacion),
         file_name=f"{nombre_base}.csv",
         mime="text/csv",
     )
-    if col3.button("Volver al paso 2"):
+    col3.download_button(
+        "Configuracion en CSV (para reutilizar)",
+        data=exportar_config_csv(anio, mes, operadores,
+                                 vacaciones, rank_turno, rank_libranza),
+        file_name=f"configuracion_{anio}_{mes:02d}.csv",
+        mime="text/csv",
+        help="Guarde este archivo. La proxima vez subalo en el paso 1 para no "
+             "recapturar todo. Se puede editar en Excel.",
+    )
+
+    st.caption(
+        "Guarde la **configuracion en CSV**: la proxima vez la sube en el paso 1 "
+        "para recuperar todo y solo ajustar lo que cambio."
+    )
+
+    if st.button("Volver al paso 2"):
         st.session_state.paso = 2
         st.rerun()
 

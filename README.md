@@ -10,6 +10,7 @@ respetando las reglas de negocio, las preferencias y las vacaciones.
 | `app.py` | Interfaz web (Streamlit) con el flujo de 3 pasos. |
 | `motor.py` | Logica de negocio pura (construccion de operadores y asignacion). |
 | `exportar.py` | Genera el Excel con colores y el CSV. |
+| `configuracion.py` | Guarda y recupera los inputs (config) en un CSV. |
 | `test_motor.py` | Prueba que valida las reglas duras. Opcional. |
 | `requirements.txt` | Dependencias. |
 
@@ -42,6 +43,26 @@ Streamlit por otra cosa, `motor.py` se reutiliza tal cual.
    ordene los dos rankings arrastrando (arriba = mas flexible).
 3. **Calendario.** Se genera el mes con los tres turnos por dia y se descarga en
    Excel o CSV.
+
+## Guardar y recuperar la configuracion (no recapturar cada mes)
+
+La app no guarda datos por si misma. Para no volver a teclear todo si a mitad de
+mes cambia una vacacion o una prioridad, use el archivo de configuracion:
+
+1. En el paso 3, descargue **"Configuracion en CSV (para reutilizar)"**. Ese
+   archivo lleva todos los inputs: turno y libranza de cada operador, su posicion
+   en cada ranking y sus dias de vacaciones.
+2. La proxima vez, en el paso 1, use **"Cargar una configuracion guardada (CSV)"**
+   y suba ese archivo. Se recupera todo y solo ajusta lo que cambio (por ejemplo,
+   agrega un dia de vacaciones a alguien) en el paso 2.
+3. Tambien puede editar el CSV directamente en Excel antes de subirlo: cambie la
+   celda de "Vacaciones" (fechas AAAA-MM-DD separadas por ';') o las columnas de
+   ranking. Luego lo sube y regenera.
+
+Los mismos inputs quedan tambien dentro del Excel, en la hoja "Configuracion".
+
+La matriz de preferencia (turno y libranza de cada quien) se muestra como
+recordatorio en el paso 2 y en la pantalla de salida.
 
 ## Como leer el calendario
 

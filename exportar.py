@@ -57,11 +57,13 @@ def exportar_csv(programacion):
     return df.to_csv(index=False).encode("utf-8-sig")
 
 
-def exportar_excel(programacion, anio, mes):
+def exportar_excel(programacion, anio, mes, operadores=None,
+                   vacaciones=None, rank_turno=None, rank_libranza=None):
     """
-    Devuelve los bytes de un Excel con dos hojas:
+    Devuelve los bytes de un Excel con estas hojas:
       - 'Programacion': tabla larga con colores por celda.
-      - 'Calendario': vista de calendario mensual con los tres turnos por dia.
+      - 'Calendario': vista de calendario del periodo con los tres turnos por dia.
+      - 'Configuracion': los datos de entrada (solo si se pasan 'operadores').
     """
     wb = Workbook()
 
@@ -174,6 +176,40 @@ def exportar_excel(programacion, anio, mes):
     cal.cell(row=fila_actual, column=1).fill = AMARILLO
     cal.cell(row=fila_actual + 1, column=1, value="[ROJO] = no se cumplio el minimo de 3")
     cal.cell(row=fila_actual + 1, column=1).fill = ROJO
+
+    # ------------------------------------------------------------------ #
+    # Hoja 3 (opcional): Configuracion, o sea los datos de entrada usados.
+    # Se incluye si se pasan operadores, para que el Excel lleve tambien los
+    # inputs (turno y libranza de cada quien, rankings y vacaciones).
+    # ------------------------------------------------------------------ #
+    if operadores is not None:
+        vacaciones = vacaciones or {}
+        rank_turno = rank_turno or []
+        rank_libranza = rank_libranza or []
+        pos_turno = {op: i + 1 for i, op in enumerate(rank_turno)}
+        pos_libranza = {op: i + 1 for i, op in enumerate(rank_libranza)}
+
+        conf = wb.create_sheet("Configuracion")
+        cabecera = ["Anio", "Mes", "Operador", "Turno", "Libranza",
+                    "RankTurno", "RankLibranza", "Vacaciones"]
+        conf.append(cabecera)
+        for celda in conf[1]:
+            celda.font = Font(bold=True, color="FFFFFF")
+            celda.fill = PatternFill(start_color="404040", end_color="404040", fill_type="solid")
+            celda.alignment = Alignment(horizontal="center")
+
+        for op, info in operadores.items():
+            dias = sorted(vacaciones.get(op, set()))
+            vac_txt = "; ".join(d.isoformat() for d in dias)
+            conf.append([
+                anio, mes, op, info["turno"], info["libranza"],
+                pos_turno.get(op, ""), pos_libranza.get(op, ""), vac_txt,
+            ])
+
+        anchos_conf = {"A": 8, "B": 6, "C": 18, "D": 10, "E": 16,
+                       "F": 11, "G": 13, "H": 40}
+        for col, ancho in anchos_conf.items():
+            conf.column_dimensions[col].width = ancho
 
     # ------------------------------------------------------------------ #
     buffer = io.BytesIO()
